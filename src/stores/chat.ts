@@ -1,216 +1,280 @@
 /**
  * Chat State Store
- * Manages chat messages and conversation state
+ * Manages chat messages, sessions, streaming, and thinking state.
+ * Communicates with OpenClaw Gateway via gateway:rpc IPC.
  */
 import { create } from 'zustand';
 
-/**
- * Tool call in a message
- */
-interface ToolCall {
-  id: string;
-  name: string;
-  arguments: Record<string, unknown>;
-  result?: unknown;
-  status: 'pending' | 'running' | 'completed' | 'error';
+// ── Types ────────────────────────────────────────────────────────
+
+/** Raw message from OpenClaw chat.history */
+export interface RawMessage {
+  role: 'user' | 'assistant' | 'system' | 'toolresult';
+  content: unknown; // string | ContentBlock[]
+  timestamp?: number;
+  id?: string;
+  toolCallId?: string;
 }
 
-/**
- * Chat message
- */
-interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-  timestamp: string;
-  channel?: string;
-  toolCalls?: ToolCall[];
+/** Content block inside a message */
+export interface ContentBlock {
+  type: 'text' | 'image' | 'thinking' | 'tool_use' | 'tool_result';
+  text?: string;
+  thinking?: string;
+  source?: { type: string; media_type: string; data: string };
+  id?: string;
+  name?: string;
+  input?: unknown;
+  content?: unknown;
+}
+
+/** Session from sessions.list */
+export interface ChatSession {
+  key: string;
+  label?: string;
+  displayName?: string;
+  thinkingLevel?: string;
+  model?: string;
 }
 
 interface ChatState {
-  messages: ChatMessage[];
+  // Messages
+  messages: RawMessage[];
   loading: boolean;
-  sending: boolean;
   error: string | null;
-  // Track active run for streaming
+
+  // Streaming
+  sending: boolean;
   activeRunId: string | null;
-  
+  streamingText: string;
+  streamingMessage: unknown | null;
+
+  // Sessions
+  sessions: ChatSession[];
+  currentSessionKey: string;
+
+  // Thinking
+  showThinking: boolean;
+  thinkingLevel: string | null;
+
   // Actions
-  fetchHistory: (limit?: number) => Promise<void>;
-  sendMessage: (content: string, channelId?: string) => Promise<void>;
-  clearHistory: () => Promise<void>;
-  addMessage: (message: ChatMessage) => void;
-  updateMessage: (messageId: string, updates: Partial<ChatMessage>) => void;
-  setMessages: (messages: ChatMessage[]) => void;
+  loadSessions: () => Promise<void>;
+  switchSession: (key: string) => void;
+  loadHistory: () => Promise<void>;
+  sendMessage: (text: string) => Promise<void>;
   handleChatEvent: (event: Record<string, unknown>) => void;
+  toggleThinking: () => void;
+  refresh: () => Promise<void>;
+  clearError: () => void;
 }
+
+// ── Store ────────────────────────────────────────────────────────
 
 export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   loading: false,
-  sending: false,
   error: null,
+
+  sending: false,
   activeRunId: null,
-  
-  fetchHistory: async (limit = 50) => {
-    set({ loading: true, error: null });
-    
+  streamingText: '',
+  streamingMessage: null,
+
+  sessions: [],
+  currentSessionKey: 'main',
+
+  showThinking: true,
+  thinkingLevel: null,
+
+  // ── Load sessions via sessions.list ──
+
+  loadSessions: async () => {
     try {
-      // OpenClaw chat.history requires: { sessionKey, limit? }
-      // Response format: { sessionKey, sessionId, messages, thinkingLevel, verboseLevel }
+      const result = await window.electron.ipcRenderer.invoke(
+        'gateway:rpc',
+        'sessions.list',
+        { limit: 50 }
+      ) as { success: boolean; result?: Record<string, unknown>; error?: string };
+
+      if (result.success && result.result) {
+        const data = result.result;
+        const rawSessions = Array.isArray(data.sessions) ? data.sessions : [];
+        const sessions: ChatSession[] = rawSessions.map((s: Record<string, unknown>) => ({
+          key: String(s.key || ''),
+          label: s.label ? String(s.label) : undefined,
+          displayName: s.displayName ? String(s.displayName) : undefined,
+          thinkingLevel: s.thinkingLevel ? String(s.thinkingLevel) : undefined,
+          model: s.model ? String(s.model) : undefined,
+        })).filter((s: ChatSession) => s.key);
+
+        set({ sessions });
+      }
+    } catch (err) {
+      console.warn('Failed to load sessions:', err);
+    }
+  },
+
+  // ── Switch session ──
+
+  switchSession: (key: string) => {
+    set({
+      currentSessionKey: key,
+      messages: [],
+      streamingText: '',
+      streamingMessage: null,
+      activeRunId: null,
+      error: null,
+    });
+    // Load history for new session
+    get().loadHistory();
+  },
+
+  // ── Load chat history ──
+
+  loadHistory: async () => {
+    const { currentSessionKey } = get();
+    set({ loading: true, error: null });
+
+    try {
       const result = await window.electron.ipcRenderer.invoke(
         'gateway:rpc',
         'chat.history',
-        { sessionKey: 'main', limit }
-      ) as { success: boolean; result?: { messages?: unknown[] } | unknown; error?: string };
-      
+        { sessionKey: currentSessionKey, limit: 200 }
+      ) as { success: boolean; result?: Record<string, unknown>; error?: string };
+
       if (result.success && result.result) {
-        const data = result.result as Record<string, unknown>;
-        const rawMessages = Array.isArray(data.messages) ? data.messages : [];
-        
-        // Map OpenClaw messages to our ChatMessage format
-        const messages: ChatMessage[] = rawMessages.map((msg: unknown, idx: number) => {
-          const m = msg as Record<string, unknown>;
-          return {
-            id: String(m.id || `msg-${idx}`),
-            role: (m.role as 'user' | 'assistant' | 'system') || 'assistant',
-            content: String(m.content || m.text || ''),
-            timestamp: String(m.timestamp || new Date().toISOString()),
-          };
-        });
-        
-        set({ messages, loading: false });
+        const data = result.result;
+        const rawMessages = Array.isArray(data.messages) ? data.messages as RawMessage[] : [];
+        const thinkingLevel = data.thinkingLevel ? String(data.thinkingLevel) : null;
+        set({ messages: rawMessages, thinkingLevel, loading: false });
       } else {
-        // No history yet or method not available - just show empty
         set({ messages: [], loading: false });
       }
-    } catch (error) {
-      console.warn('Failed to fetch chat history:', error);
+    } catch (err) {
+      console.warn('Failed to load chat history:', err);
       set({ messages: [], loading: false });
     }
   },
-  
-  sendMessage: async (content, _channelId) => {
-    const { addMessage } = get();
-    
-    // Add user message immediately
-    const userMessage: ChatMessage = {
-      id: crypto.randomUUID(),
+
+  // ── Send message ──
+
+  sendMessage: async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    const { currentSessionKey } = get();
+
+    // Add user message optimistically
+    const userMsg: RawMessage = {
       role: 'user',
-      content,
-      timestamp: new Date().toISOString(),
+      content: trimmed,
+      timestamp: Date.now() / 1000,
+      id: crypto.randomUUID(),
     };
-    addMessage(userMessage);
-    
-    set({ sending: true, error: null });
-    
+    set((s) => ({
+      messages: [...s.messages, userMsg],
+      sending: true,
+      error: null,
+      streamingText: '',
+      streamingMessage: null,
+    }));
+
     try {
-      // OpenClaw chat.send requires: { sessionKey, message, idempotencyKey }
-      // Response is an acknowledgment: { runId, status: "started" }
-      // The actual AI response comes via WebSocket chat events
       const idempotencyKey = crypto.randomUUID();
       const result = await window.electron.ipcRenderer.invoke(
         'gateway:rpc',
         'chat.send',
-        { sessionKey: 'main', message: content, idempotencyKey }
-      ) as { success: boolean; result?: { runId?: string; status?: string }; error?: string };
-      
+        {
+          sessionKey: currentSessionKey,
+          message: trimmed,
+          deliver: false,
+          idempotencyKey,
+        }
+      ) as { success: boolean; result?: { runId?: string }; error?: string };
+
       if (!result.success) {
         set({ error: result.error || 'Failed to send message', sending: false });
-      } else {
-        // Store the active run ID - response will come via chat events
-        const runId = result.result?.runId;
-        if (runId) {
-          set({ activeRunId: runId });
-        }
-        // Keep sending=true until we receive the final chat event
+      } else if (result.result?.runId) {
+        set({ activeRunId: result.result.runId });
       }
-    } catch (error) {
-      set({ error: String(error), sending: false });
+    } catch (err) {
+      set({ error: String(err), sending: false });
     }
   },
-  
-  clearHistory: async () => {
-    try {
-      await window.electron.ipcRenderer.invoke('gateway:rpc', 'chat.clear');
-      set({ messages: [] });
-    } catch (error) {
-      console.error('Failed to clear history:', error);
-    }
-  },
-  
-  addMessage: (message) => {
-    set((state) => ({
-      messages: [...state.messages, message],
-    }));
-  },
-  
-  updateMessage: (messageId, updates) => {
-    set((state) => ({
-      messages: state.messages.map((msg) =>
-        msg.id === messageId ? { ...msg, ...updates } : msg
-      ),
-    }));
-  },
-  
-  setMessages: (messages) => set({ messages }),
-  
-  /**
-   * Handle incoming chat event from Gateway WebSocket
-   * Events: { runId, sessionKey, seq, state, message, errorMessage }
-   * States: "delta" (streaming), "final" (complete), "aborted", "error"
-   */
-  handleChatEvent: (event) => {
-    const { addMessage, updateMessage, messages } = get();
+
+  // ── Handle incoming chat events from Gateway ──
+
+  handleChatEvent: (event: Record<string, unknown>) => {
     const runId = String(event.runId || '');
-    const state = String(event.state || '');
-    
-    if (state === 'delta') {
-      // Streaming delta - find or create assistant message for this run
-      const existingMsg = messages.find((m) => m.id === `run-${runId}`);
-      const messageContent = event.message as Record<string, unknown> | undefined;
-      const content = String(messageContent?.content || messageContent?.text || '');
-      
-      if (existingMsg) {
-        // Append to existing message
-        updateMessage(`run-${runId}`, {
-          content: existingMsg.content + content,
+    const eventState = String(event.state || '');
+    const { activeRunId } = get();
+
+    // Only process events for the active run (or if no active run set)
+    if (activeRunId && runId && runId !== activeRunId) return;
+
+    switch (eventState) {
+      case 'delta': {
+        // Streaming update - store the cumulative message
+        set({
+          streamingMessage: event.message ?? get().streamingMessage,
         });
-      } else if (content) {
-        // Create new assistant message
-        addMessage({
-          id: `run-${runId}`,
-          role: 'assistant',
-          content,
-          timestamp: new Date().toISOString(),
-        });
+        break;
       }
-    } else if (state === 'final') {
-      // Final message - replace or add complete response
-      const messageContent = event.message as Record<string, unknown> | undefined;
-      const content = String(
-        messageContent?.content 
-        || messageContent?.text 
-        || (typeof messageContent === 'string' ? messageContent : '')
-      );
-      
-      const existingMsg = messages.find((m) => m.id === `run-${runId}`);
-      if (existingMsg) {
-        updateMessage(`run-${runId}`, { content });
-      } else if (content) {
-        addMessage({
-          id: `run-${runId}`,
-          role: 'assistant',
-          content,
-          timestamp: new Date().toISOString(),
-        });
+      case 'final': {
+        // Message complete - add to history and clear streaming
+        const finalMsg = event.message as RawMessage | undefined;
+        if (finalMsg) {
+          set((s) => ({
+            messages: [...s.messages, {
+              ...finalMsg,
+              role: finalMsg.role || 'assistant',
+              id: finalMsg.id || `run-${runId}`,
+            }],
+            streamingText: '',
+            streamingMessage: null,
+            sending: false,
+            activeRunId: null,
+          }));
+        } else {
+          // No message in final event - reload history to get complete data
+          set({ streamingText: '', streamingMessage: null, sending: false, activeRunId: null });
+          get().loadHistory();
+        }
+        break;
       }
-      set({ sending: false, activeRunId: null });
-    } else if (state === 'error') {
-      const errorMsg = String(event.errorMessage || 'An error occurred');
-      set({ error: errorMsg, sending: false, activeRunId: null });
-    } else if (state === 'aborted') {
-      set({ sending: false, activeRunId: null });
+      case 'error': {
+        const errorMsg = String(event.errorMessage || 'An error occurred');
+        set({
+          error: errorMsg,
+          sending: false,
+          activeRunId: null,
+          streamingText: '',
+          streamingMessage: null,
+        });
+        break;
+      }
+      case 'aborted': {
+        set({
+          sending: false,
+          activeRunId: null,
+          streamingText: '',
+          streamingMessage: null,
+        });
+        break;
+      }
     }
   },
+
+  // ── Toggle thinking visibility ──
+
+  toggleThinking: () => set((s) => ({ showThinking: !s.showThinking })),
+
+  // ── Refresh: reload history + sessions ──
+
+  refresh: async () => {
+    const { loadHistory, loadSessions } = get();
+    await Promise.all([loadHistory(), loadSessions()]);
+  },
+
+  clearError: () => set({ error: null }),
 }));
