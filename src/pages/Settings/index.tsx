@@ -2,16 +2,15 @@
  * Settings Page
  * Application configuration
  */
-import { useState, useEffect } from 'react';
 import {
   Sun,
   Moon,
   Monitor,
   RefreshCw,
-  Loader2,
   Terminal,
   ExternalLink,
   Key,
+  Download,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -21,7 +20,9 @@ import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { useSettingsStore } from '@/stores/settings';
 import { useGatewayStore } from '@/stores/gateway';
+import { useUpdateStore } from '@/stores/update';
 import { ProvidersSettings } from '@/components/settings/ProvidersSettings';
+import { UpdateSettings } from '@/components/settings/UpdateSettings';
 
 export function Settings() {
   const {
@@ -37,26 +38,7 @@ export function Settings() {
   } = useSettingsStore();
   
   const { status: gatewayStatus, restart: restartGateway } = useGatewayStore();
-  
-  const [appVersion, setAppVersion] = useState('0.1.0');
-  const [checkingUpdate, setCheckingUpdate] = useState(false);
-  
-  // Get app version
-  useEffect(() => {
-    window.electron.ipcRenderer.invoke('app:version').then((version) => {
-      setAppVersion(version as string);
-    });
-  }, []);
-  
-  // Check for updates
-  const handleCheckUpdate = async () => {
-    setCheckingUpdate(true);
-    try {
-      await window.electron.ipcRenderer.invoke('update:check');
-    } finally {
-      setCheckingUpdate(false);
-    }
-  };
+  const currentVersion = useUpdateStore((state) => state.currentVersion);
   
   // Open developer console
   const openDevConsole = () => {
@@ -178,32 +160,14 @@ export function Settings() {
       {/* Updates */}
       <Card>
         <CardHeader>
-          <CardTitle>Updates</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <Download className="h-5 w-5" />
+            Updates
+          </CardTitle>
           <CardDescription>Keep ClawX up to date</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex items-center justify-between p-4 rounded-lg border">
-            <div>
-              <p className="font-medium">ClawX</p>
-              <p className="text-sm text-muted-foreground">
-                Version {appVersion}
-              </p>
-            </div>
-            <Button
-              variant="outline"
-              onClick={handleCheckUpdate}
-              disabled={checkingUpdate}
-            >
-              {checkingUpdate ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Checking...
-                </>
-              ) : (
-                'Check for Updates'
-              )}
-            </Button>
-          </div>
+          <UpdateSettings />
           
           <Separator />
           
@@ -271,7 +235,7 @@ export function Settings() {
             <strong>ClawX</strong> - Graphical AI Assistant
           </p>
           <p>Based on OpenClaw</p>
-          <p>Version {appVersion}</p>
+          <p>Version {currentVersion}</p>
           <div className="flex gap-4 pt-2">
             <Button
               variant="link"

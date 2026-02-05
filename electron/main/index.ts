@@ -9,6 +9,7 @@ import { registerIpcHandlers } from './ipc-handlers';
 import { createTray } from './tray';
 import { createMenu } from './menu';
 import { PORTS } from '../utils/config';
+import { appUpdater, registerUpdateHandlers } from './updater';
 
 // Disable GPU acceleration for better compatibility
 app.disableHardwareAcceleration();
@@ -75,6 +76,18 @@ async function initialize(): Promise<void> {
 
   // Register IPC handlers
   registerIpcHandlers(gatewayManager, mainWindow);
+
+  // Register update handlers
+  registerUpdateHandlers(appUpdater, mainWindow);
+
+  // Check for updates after a delay (only in production)
+  if (!process.env.VITE_DEV_SERVER_URL) {
+    setTimeout(() => {
+      appUpdater.checkForUpdates().catch((err) => {
+        console.error('Failed to check for updates:', err);
+      });
+    }, 10000); // Check after 10 seconds
+  }
 
   // Handle window close
   mainWindow.on('closed', () => {

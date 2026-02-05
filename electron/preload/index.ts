@@ -43,10 +43,13 @@ const electronAPI = {
         'settings:getAll',
         'settings:reset',
         // Update
+        'update:status',
+        'update:version',
         'update:check',
         'update:download',
         'update:install',
-        'update:getStatus',
+        'update:setChannel',
+        'update:setAutoDownload',
         // Env
         'env:getConfig',
         'env:setApiKey',
@@ -93,9 +96,13 @@ const electronAPI = {
         'gateway:exit',
         'gateway:error',
         'navigate',
+        'update:status-changed',
+        'update:checking',
         'update:available',
+        'update:not-available',
+        'update:progress',
         'update:downloaded',
-        'update:status',
+        'update:error',
         'cron:updated',
       ];
       
@@ -128,9 +135,13 @@ const electronAPI = {
         'gateway:exit',
         'gateway:error',
         'navigate',
+        'update:status-changed',
+        'update:checking',
         'update:available',
+        'update:not-available',
+        'update:progress',
         'update:downloaded',
-        'update:status',
+        'update:error',
       ];
       
       if (validChannels.includes(channel)) {
