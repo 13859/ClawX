@@ -215,6 +215,8 @@ jobs:
   upload-oss:
     needs: release
     runs-on: ubuntu-latest
+    # Skip if OSS credentials are not configured
+    if: ${{ secrets.OSS_ACCESS_KEY_ID != '' }}
 
     steps:
       - name: Checkout code
@@ -403,7 +405,7 @@ jobs:
   finalize:
     needs: [publish, upload-oss]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+    if: ${{ always() && needs.publish.result == 'success' && startsWith(github.ref, 'refs/tags/') }}
 
     steps:
       - name: Promote release from pre-release to latest
