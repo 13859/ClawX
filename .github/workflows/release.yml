@@ -35,7 +35,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -58,19 +58,32 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pnpm-store-
 
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('**/pnpm-lock.yaml') }}
+
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - name: Cache uv binaries
+        id: uv-cache
+        uses: actions/cache@v4
+        with:
+          path: resources/bin
+          key: ${{ runner.os }}-${{ runner.arch }}-uv-${{ hashFiles('scripts/download-bundled-uv.mjs') }}
 
       - name: Download uv binaries for macOS
-        if: matrix.platform == 'mac'
+        if: matrix.platform == 'mac' && steps.uv-cache.outputs.cache-hit != 'true'
         run: pnpm run uv:download:mac
 
       - name: Download uv binaries for Windows
-        if: matrix.platform == 'win'
+        if: matrix.platform == 'win' && steps.uv-cache.outputs.cache-hit != 'true'
         run: pnpm run uv:download:win
 
       - name: Download uv binaries for Linux
-        if: matrix.platform == 'linux'
+        if: matrix.platform == 'linux' && steps.uv-cache.outputs.cache-hit != 'true'
         run: pnpm run uv:download:linux
 
       # macOS specific steps
