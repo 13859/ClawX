@@ -215,19 +215,32 @@ jobs:
   upload-oss:
     needs: release
     runs-on: ubuntu-latest
-    # Skip if OSS credentials are not configured
-    if: ${{ secrets.OSS_ACCESS_KEY_ID != '' }}
 
     steps:
+      - name: Check OSS credentials
+        id: oss-check
+        run: |
+          if [ -z "$OSS_KEY" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "::warning::OSS_ACCESS_KEY_ID not configured, skipping OSS upload"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          OSS_KEY: ${{ secrets.OSS_ACCESS_KEY_ID }}
+
       - name: Checkout code
+        if: steps.oss-check.outputs.skip != 'true'
         uses: actions/checkout@v4
 
       - name: Download all artifacts
+        if: steps.oss-check.outputs.skip != 'true'
         uses: actions/download-artifact@v4
         with:
           path: release-artifacts
 
       - name: Extract version and channel
+        if: steps.oss-check.outputs.skip != 'true'
         id: version
         run: |
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
@@ -250,6 +263,7 @@ jobs:
           echo "Detected version: ${VERSION}, channel: ${CHANNEL}"
 
       - name: Prepare upload directories
+        if: steps.oss-check.outputs.skip != 'true'
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           TAG="${{ steps.version.outputs.tag }}"
@@ -275,12 +289,14 @@ jobs:
       # requests "latest-mac.yml", "latest.yml", etc. regardless of feed URL.
       # Channel separation is achieved by directory: /alpha/, /beta/, /latest/.
       - name: Verify yml files present
+        if: steps.oss-check.outputs.skip != 'true'
         run: |
           CHANNEL="${{ steps.version.outputs.channel }}"
           echo "=== staging/${CHANNEL}/ (update metadata) ==="
           ls -la staging/${CHANNEL}/*.yml 2>/dev/null || echo "No yml files found (check electron-builder outputs)"
 
       - name: Generate release-info.json
+        if: steps.oss-check.outputs.skip != 'true'
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           CHANNEL="${{ steps.version.outputs.channel }}"
@@ -320,6 +336,7 @@ jobs:
           cat staging/${CHANNEL}/release-info.json
 
       - name: Install and configure ossutil
+        if: steps.oss-check.outputs.skip != 'true'
         env:
           OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
           OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
@@ -338,6 +355,7 @@ jobs:
           ossutil --version
 
       - name: "Upload to OSS: {channel}/ (overwrite)"
+        if: steps.oss-check.outputs.skip != 'true'
         run: |
           CHANNEL="${{ steps.version.outputs.channel }}"
 
@@ -353,6 +371,7 @@ jobs:
           echo "Uploaded to ${CHANNEL}/"
 
       - name: "Upload to OSS: releases/vX.Y.Z/ (archive)"
+        if: steps.oss-check.outputs.skip != 'true'
         run: |
           TAG="${{ steps.version.outputs.tag }}"
 
@@ -365,6 +384,7 @@ jobs:
           echo "Uploaded to releases/${TAG}/"
 
       - name: Verify OSS upload
+        if: steps.oss-check.outputs.skip != 'true'
         run: |
           TAG="${{ steps.version.outputs.tag }}"
           CHANNEL="${{ steps.version.outputs.channel }}"
