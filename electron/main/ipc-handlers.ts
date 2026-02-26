@@ -905,16 +905,17 @@ function registerProviderHandlers(gatewayManager: GatewayManager): void {
               ? `${nextConfig.type}/${nextConfig.model}`
               : undefined;
             if (nextConfig.type === 'custom' || nextConfig.type === 'ollama') {
-              setOpenClawDefaultModelWithOverride(nextConfig.type, modelOverride, {
-                baseUrl: nextConfig.baseUrl,
-                api: 'openai-completions',
-              });
-              // Also update per-agent models.json so the gateway sees the
-              // change immediately (baseUrl or model ID may have changed).
               const resolvedKey =
                 apiKey !== undefined
                   ? apiKey.trim() || null
                   : await getApiKey(providerId);
+              setOpenClawDefaultModelWithOverride(nextConfig.type, modelOverride, {
+                baseUrl: nextConfig.baseUrl,
+                api: 'openai-completions',
+                apiKey: resolvedKey || undefined,
+              });
+              // Also update per-agent models.json so the gateway sees the
+              // change immediately (baseUrl or model ID may have changed).
               if (resolvedKey && nextConfig.baseUrl) {
                 const modelId = nextConfig.model;
                 updateAgentModelProvider(nextConfig.type, {
@@ -1000,11 +1001,13 @@ function registerProviderHandlers(gatewayManager: GatewayManager): void {
 
           if (provider.type === 'custom' || provider.type === 'ollama') {
             // For runtime-configured providers, use user-entered base URL/api.
-            // Do NOT set apiKeyEnv — the OpenClaw gateway resolves custom
-            // provider keys via auth-profiles, not the config apiKey field.
+            // Also pass apiKey so openclaw.json has the key inline — the Gateway
+            // reads it from the config's models.providers.<type>.apiKey field.
+            const providerKeyForConfig = await getApiKey(providerId);
             setOpenClawDefaultModelWithOverride(provider.type, modelOverride, {
               baseUrl: provider.baseUrl,
               api: 'openai-completions',
+              apiKey: providerKeyForConfig || undefined,
             });
           } else {
             setOpenClawDefaultModel(provider.type, modelOverride);

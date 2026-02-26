@@ -4,6 +4,7 @@ import google from './google.svg';
 import openrouter from './openrouter.svg';
 import moonshot from './moonshot.svg';
 import siliconflow from './siliconflow.svg';
+import glm from './glm.svg';
 import ollama from './ollama.svg';
 import custom from './custom.svg';
 
@@ -14,6 +15,7 @@ export const providerIcons: Record<string, string> = {
     openrouter,
     moonshot,
     siliconflow,
+    glm,
     ollama,
     custom,
 };

@@ -12,6 +12,7 @@ export const BUILTIN_PROVIDER_TYPES = [
   'openrouter',
   'moonshot',
   'siliconflow',
+  'glm',
   'ollama',
 ] as const;
 export type BuiltinProviderType = (typeof BUILTIN_PROVIDER_TYPES)[number];
@@ -92,6 +93,26 @@ const REGISTRY: Record<string, ProviderBackendMeta> = {
       baseUrl: 'https://api.siliconflow.cn/v1',
       api: 'openai-completions',
       apiKeyEnv: 'SILICONFLOW_API_KEY',
+    },
+  },
+  glm: {
+    envVar: 'GLM_API_KEY',
+    defaultModel: 'glm/glm-4',
+    providerConfig: {
+      baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+      api: 'openai-completions',
+      apiKeyEnv: 'GLM_API_KEY',
+      models: [
+        {
+          id: 'glm-4',
+          name: 'GLM-4',
+          reasoning: false,
+          input: ['text'],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 128000,
+          maxTokens: 4096,
+        },
+      ],
     },
   },
   custom: {

@@ -314,6 +314,7 @@ interface RuntimeProviderConfigOverride {
   baseUrl?: string;
   api?: string;
   apiKeyEnv?: string;
+  apiKey?: string;
 }
 
 /**
@@ -371,8 +372,8 @@ export function setOpenClawDefaultModelWithOverride(
       api: override.api,
       models: nextModels,
     };
-    if (override.apiKeyEnv) {
-      nextProvider.apiKey = override.apiKeyEnv;
+    if (override.apiKey || override.apiKeyEnv) {
+      nextProvider.apiKey = override.apiKey || override.apiKeyEnv;
     }
 
     providers[provider] = nextProvider;
